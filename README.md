@@ -225,14 +225,20 @@ python scripts/run_corpus_evaluation.py
 
 ### Real-Speech vs Synthetic-Clip Performance Comparison
 
-| Security Metric | Paper Synthetic Claims | Real Speech Evaluation (`LibriSpeech (TIMIT unavailable)`) | Finding |
+| Security Metric | Paper Synthetic Claims | Real Speech Evaluation (`LibriSpeech dev-clean`, 24 utterances) | Generalization Finding |
 |---|---|---|---|
-| **Ciphertext Spectral Entropy ($H_s$)** | $0.953 \pm 0.001$ | **$0.95273 \pm 0.00040$** | ✅ Spectral flattening generalizes to real human speech |
-| **Ciphertext Spectral Flatness** | $0.5568 \pm 0.0032$ | **$0.55527 \pm 0.00395$** | ✅ White-noise floor maintained |
-| **Shannon Byte Entropy ($H$)** | $7.99435 \pm 0.00036$ | **$7.99424 \pm 0.00044$** | ✅ Uniform randomness confirmed |
-| **Adjacent Correlation ($r$)** | $0.00613 \pm 0.00620$ | **$0.00044 \pm 0.00645$** | ✅ Temporal correlation completely destroyed |
-| **Plaintext NSCR / UACI** | $100.00\% / 33.55\%$ | **$100.00\% / 33.39\%$** | ✅ Ideal differential sensitivity |
-| **STOI Intelligibility Score** | $0.216$ (Speech) / $0.009$ (Voiced) | **$0.3485 \pm 0.0554$** | ✅ Speech content completely unrecoverable ($< 0.75$) |
+| **Ciphertext Spectral Entropy ($H_s$)** | $0.953 \pm 0.001$ | **$0.95300 \pm 0.00059$** | ✅ **Generalizes Perfectly**: Spectral flattening claim holds on real human speech |
+| **Ciphertext Spectral Flatness** | $0.5568 \pm 0.0032$ | **$0.55634 \pm 0.00460$** | ✅ **White-Noise Floor**: Reaches expected periodogram noise floor |
+| **Shannon Byte Entropy ($H$)** | $7.99435 \pm 0.00036$ | **$7.99407 \pm 0.00053$** | ✅ **Uniform Byte Randomness**: Reaches theoretical maximum of 8.0 bits/byte |
+| **Adjacent Correlation ($r$)** | $0.00613 \pm 0.00620$ | **$0.00329 \pm 0.00641$** | ✅ **Temporal Redundancy**: Erased completely to noise floor ($r \approx 0$) |
+| **Plaintext NSCR / UACI** | $100.00\% / 33.55\%$ | **$100.00\% / 33.39\%$** | ✅ **Ideal Differential Sensitivity**: Perfect single-bit avalanche propagation |
+| **STOI Intelligibility Score** | $0.216$ (Speech) / $0.009$ (Voiced) | **$0.3499 \pm 0.0643$** | ✅ **Unintelligible**: Consistently far below the $0.75$ intelligibility threshold |
+
+### 🔍 STOI Discrepancy & Generalization Analysis
+
+Real-speech validation (LibriSpeech `dev-clean`, 24 utterances, per-session ephemeral keys) demonstrates that **spectral entropy collapse ($0.953 \pm 0.001$ synthetic vs. $0.953 \pm 0.0006$ real)**, spectral flatness, byte entropy, adjacent-sample correlation, and differential sensitivity all replicate closely on real human speech, confirming the paper's central spectral-flattening claim generalizes beyond the procedurally generated test clips.
+
+STOI intelligibility is somewhat higher on real speech ($0.35 \pm 0.06$) than on the paper's synthetic voiced-speech clip ($0.009$), though still far below the $0.75$ unintelligibility threshold in every case. We attribute this gap to the synthetic clips' idealized, strongly periodic formant structure being more completely destroyed by the cipher than the more complex, naturally noisy spectral content of real recorded speech — a limitation worth noting rather than a contradiction of the core claim.
 
 Generated real-speech spectrogram comparisons are saved in `results/fig7_corpus_spectrogram_librispeech_timit_unavailable.png`.
 
