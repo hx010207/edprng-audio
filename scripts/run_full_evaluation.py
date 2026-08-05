@@ -33,6 +33,7 @@ from scipy import signal as scipy_signal
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "tests"))
 
 from ecga.genetic import GeneticOptimizer, compute_byte_entropy
 from ecga.hyperchaos import CERTIFIED_THETA, HyperchaoticGenerator

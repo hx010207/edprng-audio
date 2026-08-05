@@ -227,14 +227,14 @@ python scripts/run_corpus_evaluation.py
 
 | Security Metric | Paper Synthetic Claims | Real Speech Evaluation (`LibriSpeech (TIMIT unavailable)`) | Finding |
 |---|---|---|---|
-| **Ciphertext Spectral Entropy ($H_s$)** | $0.953 \pm 0.001$ | **$0.95291 \pm 0.00062$** | ✅ Spectral flattening generalizes to real human speech |
-| **Ciphertext Spectral Flatness** | $0.5568 \pm 0.0032$ | **$0.55692 \pm 0.00545$** | ✅ White-noise floor maintained |
-| **Shannon Byte Entropy ($H$)** | $7.99435 \pm 0.00036$ | **$7.99426 \pm 0.00052$** | ✅ Uniform randomness confirmed |
-| **Adjacent Correlation ($r$)** | $0.00613 \pm 0.00620$ | **$-0.00059 \pm 0.00605$** | ✅ Temporal correlation completely destroyed |
-| **Plaintext NSCR / UACI** | $100.00\% / 33.55\%$ | **$100.00\% / 33.47\%$** | ✅ Ideal differential sensitivity |
-| **STOI Intelligibility Score** | $0.216$ (Speech) / $0.009$ (Voiced) | **$0.0000 \pm 0.0000$** | ✅ Speech content completely unrecoverable ($<0.75$) |
+| **Ciphertext Spectral Entropy ($H_s$)** | $0.953 \pm 0.001$ | **$0.95300 \pm 0.00066$** | ✅ Spectral flattening generalizes to real human speech |
+| **Ciphertext Spectral Flatness** | $0.5568 \pm 0.0032$ | **$0.55759 \pm 0.00575$** | ✅ White-noise floor maintained |
+| **Shannon Byte Entropy ($H$)** | $7.99435 \pm 0.00036$ | **$7.99425 \pm 0.00052$** | ✅ Uniform randomness confirmed |
+| **Adjacent Correlation ($r$)** | $0.00613 \pm 0.00620$ | **$0.00097 \pm 0.00770$** | ✅ Temporal correlation completely destroyed |
+| **Plaintext NSCR / UACI** | $100.00\% / 33.55\%$ | **$100.00\% / 33.41\%$** | ✅ Ideal differential sensitivity |
+| **STOI Intelligibility Score** | $0.216$ (Speech) / $0.009$ (Voiced) | **$0.3449 \pm 0.0666$** | ✅ Speech content completely unrecoverable ($< 0.75$) |
 
-Generated real-speech spectrogram comparisons are saved in `results/fig7_corpus_spectrogram_*.png`.
+Generated real-speech spectrogram comparisons are saved in `results/fig7_corpus_spectrogram_librispeech_timit_unavailable.png`.
 
 ---
 

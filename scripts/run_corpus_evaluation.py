@@ -60,15 +60,16 @@ except ImportError:
 
 
 def safe_stoi(ref_pcm: List[int], deg_pcm: List[int], fs: int = 8000) -> float:
-    """Compute STOI between reference and degraded audio waveforms."""
+    """Compute STOI between reference and degraded audio waveforms (stoi(ref, deg, fs))."""
     if not HAS_PYSTOI:
         return 0.0
     try:
         ref = np.array(ref_pcm, dtype=np.float64) / 32768.0
         deg = np.array(deg_pcm, dtype=np.float64) / 32768.0
-        val = stoi(fs, ref, deg, extended=False)
+        val = stoi(ref, deg, fs, extended=False)
         return float(val)
     except Exception as e:
+        print(f"STOI Exception: {e}")
         return 0.0
 
 
