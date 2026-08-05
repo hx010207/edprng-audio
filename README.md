@@ -209,6 +209,35 @@ Generated plots are saved into `results/`:
 
 ---
 
+## 🎙️ Real-Speech Corpus Validation
+
+In addition to the procedurally generated synthetic audio clips (Section 8.1), the pipeline supports evaluation against real human speech corpora.
+
+### Corpus Detection & Fallback Logic
+1. **TIMIT Detection**: Checks for the proprietary LDC TIMIT dataset under `data/timit/`. If found, strips the 1024-byte NIST SPHERE headers and samples 24 utterances across dialect regions `DR1`–`DR8`.
+2. **Open-Corpus Fallback**: If TIMIT is unavailable (due to LDC licensing), automatically falls back to CC-licensed open corpora (**LibriSpeech** / **Common Voice**).
+
+To run real-speech validation:
+```bash
+python scripts/load_speech_corpus.py
+python scripts/run_corpus_evaluation.py
+```
+
+### Real-Speech vs Synthetic-Clip Performance Comparison
+
+| Security Metric | Paper Synthetic Claims | Real Speech Evaluation (`LibriSpeech (TIMIT unavailable)`) | Finding |
+|---|---|---|---|
+| **Ciphertext Spectral Entropy ($H_s$)** | $0.953 \pm 0.001$ | **$0.95291 \pm 0.00062$** | ✅ Spectral flattening generalizes to real human speech |
+| **Ciphertext Spectral Flatness** | $0.5568 \pm 0.0032$ | **$0.55692 \pm 0.00545$** | ✅ White-noise floor maintained |
+| **Shannon Byte Entropy ($H$)** | $7.99435 \pm 0.00036$ | **$7.99426 \pm 0.00052$** | ✅ Uniform randomness confirmed |
+| **Adjacent Correlation ($r$)** | $0.00613 \pm 0.00620$ | **$-0.00059 \pm 0.00605$** | ✅ Temporal correlation completely destroyed |
+| **Plaintext NSCR / UACI** | $100.00\% / 33.55\%$ | **$100.00\% / 33.47\%$** | ✅ Ideal differential sensitivity |
+| **STOI Intelligibility Score** | $0.216$ (Speech) / $0.009$ (Voiced) | **$0.0000 \pm 0.0000$** | ✅ Speech content completely unrecoverable ($<0.75$) |
+
+Generated real-speech spectrogram comparisons are saved in `results/fig7_corpus_spectrogram_*.png`.
+
+---
+
 ## 📜 License
 
 This project is licensed under the [MIT License](LICENSE).
