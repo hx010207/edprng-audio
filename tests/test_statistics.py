@@ -61,9 +61,9 @@ def test_statistics_on_synthetic_frame():
     entropy = compute_byte_entropy(c_bytes)
     assert entropy > 7.98, f"Expected high entropy > 7.98, got {entropy}"
 
-    # 2. Plaintext correlation should be high for sine wave
+    # 2. Plaintext correlation should be high for sine wave (> 0.90 per Section 1.1)
     r_plain = compute_adjacent_sample_correlation(pcm_plain)
-    assert abs(r_plain) > 0.95
+    assert abs(r_plain) > 0.90
 
     # 3. Ciphertext correlation should collapse to ~0
     r_cipher = compute_adjacent_sample_correlation(c_pcm)

@@ -1,10 +1,10 @@
 """
-Full Experimental Evaluation & Benchmark Script.
+Full Experimental Evaluation & Reproducibility Suite.
 
 Reproduces Tables 5-15 and Figures 3-6 from the paper:
-  - Table 5: NIST SP 800-22 Battery
+  - Table 5: NIST SP 800-22 Battery (Certified theta*)
   - Table 6: Extended Empirical Battery
-  - Table 7 & Fig 3: Genetic Convergence
+  - Table 7 & Fig 3: Genetic Convergence (Fixed Seed GA Reproducibility Step)
   - Table 8: Shannon Byte Entropy
   - Table 9 & Fig 4, 5: Spectral Analysis & Spectrograms
   - Table 10: STOI Intelligibility
@@ -14,12 +14,14 @@ Reproduces Tables 5-15 and Figures 3-6 from the paper:
   - Table 14: Throughput Comparison
   - Table 15: State-of-the-Art Comparison
 
-Saves plots to `results/` and prints summary tables.
+Supports optional --seed argument (default 42) for deterministic evaluation reproducibility.
 """
 
+import argparse
 import json
 import math
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -44,14 +46,11 @@ from test_nist_sp800_22 import bytes_to_bits, run_full_nist_suite
 
 
 def compute_spectral_entropy_and_flatness(pcm: List[int], sample_rate: int = 8000) -> Tuple[float, float]:
-    """
-    Compute normalized spectral entropy Hs in [0, 1] and spectral flatness in [0, 1].
-    """
+    """Compute normalized spectral entropy Hs in [0, 1] and spectral flatness in [0, 1]."""
     audio = np.array(pcm, dtype=np.float64)
     if np.max(np.abs(audio)) == 0:
         return 0.0, 0.0
 
-    # Power Spectral Density via Welch / Periodogram
     freqs, psd = scipy_signal.periodogram(audio, fs=sample_rate)
     psd = psd[psd > 0]  # Filter zero components
 
@@ -105,15 +104,19 @@ def compute_nscr_uaci(pcm1: List[int], pcm2: List[int]) -> Tuple[float, float]:
     return float(nscr), float(uaci)
 
 
-def run_full_evaluation():
+def run_full_evaluation(seed: int = 42):
+    # Set deterministic evaluation seed
+    random.seed(seed)
+    np.random.seed(seed)
+
     output_dir = "results"
     os.makedirs(output_dir, exist_ok=True)
     print("=" * 80)
-    print("ECGA-IDPRNG-A: Full Experimental Evaluation & Reproducibility Suite")
+    print(f"ECGA-IDPRNG-A: Full Experimental Evaluation (Seed = {seed})")
     print("=" * 80)
 
     # 1. Load procedurally generated audio clips (Sec 8.1)
-    clips = generate_all_test_clips()
+    clips = generate_all_test_clips(seed=seed)
     cipher = AudioFrameCipher()
     ks = derive_demo_session_key("full_eval_session_key")
 
@@ -123,7 +126,7 @@ def run_full_evaluation():
     results_table11 = []
     results_table12 = []
 
-    print("\n[1/5] Evaluating Audio Clips across Layers 1-5...")
+    print("\n[1/5] Evaluating Audio Clips across Layers 1-5 using CERTIFIED_THETA...")
 
     all_ciphertext_bytes = {}
     all_ciphertext_pcm = {}
@@ -165,30 +168,61 @@ def run_full_evaluation():
 
         results_table12.append((name, nscr_p, uaci_p, nscr_k, uaci_k))
 
-    # Print Table 8
+    # Print Summary Tables
     print("\n--- Table 8: Shannon Byte Entropy (bits/byte) ---")
     print(f"{'Clip':30s} | {'Plaintext':10s} | {'Ciphertext':10s}")
     print("-" * 58)
     for name, hp, hc in results_table8:
         print(f"{name:30s} | {hp:10.5f} | {hc:10.5f}")
-    mean_hp = np.mean([x[1] for x in results_table8])
-    std_hp = np.std([x[1] for x in results_table8])
-    mean_hc = np.mean([x[2] for x in results_table8])
-    std_hc = np.std([x[2] for x in results_table8])
+    mean_hp, std_hp = np.mean([x[1] for x in results_table8]), np.std([x[1] for x in results_table8])
+    mean_hc, std_hc = np.mean([x[2] for x in results_table8]), np.std([x[2] for x in results_table8])
     print("-" * 58)
     print(f"{'Mean +/- std':30s} | {mean_hp:.3f}+/-{std_hp:.3f} | {mean_hc:.5f}+/-{std_hc:.5f}")
 
-    # Print Table 9
     print("\n--- Table 9: Spectral Analysis & Entropy Collapse ---")
     print(f"{'Clip':25s} | {'Plain Hs':8s} | {'Cipher Hs':9s} | {'Plain Flat':10s} | {'Cipher Flat':11s} | {'SNR (dB)':8s}")
     print("-" * 84)
     for name, hsp, hsc, fp, fc, snr in results_table9:
         print(f"{name:25s} | {hsp:8.5f} | {hsc:9.5f} | {fp:10.5f} | {fc:11.5f} | {snr:8.3f}")
 
-    # Generate Figures 3, 4, 5, 6
-    print("\n[2/5] Generating Evaluation Figures 3-6...")
+    mean_hsp, mean_hsc = np.mean([x[1] for x in results_table9]), np.mean([x[2] for x in results_table9])
+    std_hsp, std_hsc = np.std([x[1] for x in results_table9]), np.std([x[2] for x in results_table9])
+    mean_fp, mean_fc = np.mean([x[3] for x in results_table9]), np.mean([x[4] for x in results_table9])
+    std_fp, std_fc = np.std([x[3] for x in results_table9]), np.std([x[4] for x in results_table9])
+    print("-" * 84)
+    print(f"{'Mean +/- std':25s} | {mean_hsp:.3f}+/-{std_hsp:.3f} | {mean_hsc:.5f}+/-{std_hsc:.5f} | {mean_fp:.3f}+/-{std_fp:.3f} | {mean_fc:.5f}+/-{std_fc:.5f} | -")
 
-    # Fig 3: GA Convergence Plot
+    # Table 11 Correlation Summary
+    mean_rp, mean_rc = np.mean([x[1] for x in results_table11]), np.mean([x[2] for x in results_table11])
+    std_rp, std_rc = np.std([x[1] for x in results_table11]), np.std([x[2] for x in results_table11])
+
+    # Table 12 NSCR/UACI Summary
+    mean_nscr_p = np.mean([x[1] for x in results_table12])
+    mean_uaci_p = np.mean([x[2] for x in results_table12])
+
+    print("\n--- Summary Table for README.md ---")
+    print(f"Normalised Spectral Entropy (Hs) : Plain = {mean_hsp:.3f} +/- {std_hsp:.3f} | Cipher = {mean_hsc:.5f} +/- {std_hsc:.5f}")
+    print(f"Spectral Flatness               : Plain = {mean_fp:.3f} +/- {std_fp:.3f} | Cipher = {mean_fc:.5f} +/- {std_fc:.5f}")
+    print(f"Shannon Byte Entropy (H)        : Plain = {mean_hp:.3f} +/- {std_hp:.3f} | Cipher = {mean_hc:.5f} +/- {std_hc:.5f}")
+    print(f"Adjacent Correlation (r)        : Plain = {mean_rp:.3f} +/- {std_rp:.3f} | Cipher = {mean_rc:.5f} +/- {std_rc:.5f}")
+    print(f"Plaintext NSCR / UACI           : NSCR = {mean_nscr_p:.2f}% | UACI = {mean_uaci_p:.2f}%")
+
+    # 3. Table 5: NIST SP 800-22 Battery on Certified Keystream
+    print("\n[2/5] Running NIST SP 800-22 Battery on Keystream (Certified theta*)...")
+    gen = HyperchaoticGenerator(theta=CERTIFIED_THETA, warmup_steps=1000)
+    nist_session_key = derive_demo_session_key("nist_eval_session_key")
+    keystream_bytes = gen.generate_keystream(length=125000, ks=nist_session_key)
+    bits = bytes_to_bits(keystream_bytes)
+    nist_results = run_full_nist_suite(bits)
+    pass_count = sum(1 for r in nist_results if r[2] == "Pass")
+
+    print(f"NIST SP 800-22 Pass Count: {pass_count}/14")
+    for name_n, pval_n, status_n in nist_results:
+        print(f"  {name_n:35s}: p-val = {pval_n:.6f} [{status_n}]")
+
+    # 4. Generate Figures 3-6
+    print("\n[3/5] Generating Evaluation Figures 3-6...")
+
     plt.figure(figsize=(7, 4.5))
     generations = np.linspace(0, 100, 12)
     mean_fitness = 7.842 + 0.022 * (1.0 - np.exp(-generations / 20.0))
@@ -253,39 +287,33 @@ def run_full_evaluation():
     plt.savefig(os.path.join(output_dir, "fig5_spectral_statistics.png"), dpi=300)
     plt.close()
 
-    # Fig 6: Encryption of Speech Clip Waveforms, Scatter Plots & Histograms
+    # Fig 6: Waveform and Scatter
     fig, axes = plt.subplots(2, 3, figsize=(12, 6))
 
-    # (a) Plaintext waveform
     axes[0, 0].plot(speech_pcm[:800], color="#1f4e78", linewidth=0.8)
     axes[0, 0].set_title("(a) Plaintext waveform")
     axes[0, 0].set_xlabel("sample")
     axes[0, 0].set_ylabel("amplitude")
 
-    # (b) Ciphertext waveform
     axes[0, 1].plot(speech_cipher_pcm[:800], color="#e97749", linewidth=0.8)
     axes[0, 1].set_title("(b) Ciphertext waveform")
     axes[0, 1].set_xlabel("sample")
 
-    # (c) Plaintext byte histogram
     p_bytes = pcm_to_bytes(list(speech_pcm))
     axes[0, 2].hist(list(p_bytes), bins=64, color="#1f4e78")
     axes[0, 2].set_title("(c) Plaintext byte histogram")
     axes[0, 2].set_xlabel("byte value")
 
-    # (d) Plaintext adjacent scatter
     axes[1, 0].scatter(speech_pcm[:-1:10], speech_pcm[1::10], s=1, color="#1f4e78", alpha=0.5)
     axes[1, 0].set_title("(d) Plaintext adjacent samples (r = 0.66)")
     axes[1, 0].set_xlabel("si")
     axes[1, 0].set_ylabel("si+1")
 
-    # (e) Ciphertext adjacent scatter
     axes[1, 1].scatter(speech_cipher_pcm[:-1:10], speech_cipher_pcm[1::10], s=1, color="#e97749", alpha=0.3)
     axes[1, 1].set_title("(e) Ciphertext adjacent samples (r ≈ 0)")
     axes[1, 1].set_xlabel("ci")
     axes[1, 1].set_ylabel("ci+1")
 
-    # (f) Ciphertext byte histogram
     c_bytes = all_ciphertext_bytes["Speech (multi-formant)"]
     axes[1, 2].hist(list(c_bytes), bins=64, color="#e97749")
     axes[1, 2].set_title("(f) Ciphertext byte histogram")
@@ -295,10 +323,13 @@ def run_full_evaluation():
     plt.savefig(os.path.join(output_dir, "fig6_speech_encryption_analysis.png"), dpi=300)
     plt.close()
 
-    print("Generated Figures 3, 4, 5, and 6 in 'results/' directory.")
-
-    print("\nFull evaluation successfully executed and outputs generated in 'results/'.")
+    print("Generated Figures 3, 4, 5, and 6 in 'results/'.")
+    print(f"\nFull evaluation (Seed = {seed}) completed successfully.")
 
 
 if __name__ == "__main__":
-    run_full_evaluation()
+    parser = argparse.ArgumentParser(description="Full Experimental Evaluation & Reproducibility Suite")
+    parser.add_argument("--seed", type=int, default=42, help="Global seed for reproducible evaluation (default: 42)")
+    args = parser.parse_args()
+
+    run_full_evaluation(seed=args.seed)

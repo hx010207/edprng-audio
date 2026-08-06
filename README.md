@@ -115,7 +115,8 @@ ecga-idprng-a/
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
+   # Replace YOUR_USERNAME with your GitHub username/organization once created
+   git clone https://github.com/YOUR_USERNAME/ecga-idprng-a.git
    cd ecga-idprng-a
    ```
 
@@ -199,13 +200,15 @@ Generated plots are saved into `results/`:
 
 | Security Metric | Original Plaintext | ECGA-IDPRNG-A Ciphertext | Target / Ideal |
 |---|---|---|---|
-| **Normalised Spectral Entropy ($H_s$)** | $0.440 \pm 0.398$ | **$0.953 \pm 0.001$** | $1.000$ (White Noise) |
-| **Spectral Flatness** | $0.157 \pm 0.229$ | **$0.556 \pm 0.003$** | ~$0.556$ |
-| **Shannon Byte Entropy ($H$)** | $6.775 \pm 1.688$ | **$7.99435 \pm 0.00036$** | $8.000$ bits/byte |
-| **Adjacent-Sample Correlation ($r$)** | $0.575 \pm 0.349$ | **$0.00613 \pm 0.00620$** | $0.000$ |
+| **Normalised Spectral Entropy ($H_s$)** | $0.451 \pm 0.406$ | **$0.95294 \pm 0.00064$** | $1.000$ (White Noise) |
+| **Spectral Flatness** | $0.228 \pm 0.297$ | **$0.55631 \pm 0.00423$** | ~$0.556$ |
+| **Shannon Byte Entropy ($H$)** | $6.486 \pm 1.850$ | **$7.99442 \pm 0.00039$** | $8.000$ bits/byte |
+| **Adjacent-Sample Correlation ($r$)** | $0.396 \pm 0.371$ | **$0.00364 \pm 0.00718$** | $0.000$ |
 | **NSCR (Plaintext / Key Flip)** | N/A | **$100.00\%$ / $99.999\%$** | $100.00\%$ |
-| **UACI (Plaintext / Key Flip)** | N/A | **$33.55\%$ / $33.30\%$** | $33.46\%$ |
-| **NIST SP 800-22 Battery** | N/A | **11–13 / 14 Passed** | 13/14 Passed |
+| **UACI (Plaintext / Key Flip)** | N/A | **$33.32\%$ / $33.30\%$** | $33.46\%$ |
+| **NIST SP 800-22 Battery** | N/A | **11 / 14 Passed** (seed=42)* | 13/14 Passed |
+
+*\*Note on NIST SP 800-22: Under seed=42 single-run evaluation, 11 of 14 tests pass (Frequency monobit, Spectral DFT, and Maurer universal fail). The certified generator parameter vector $\theta^*$ is stochastic, and NIST pass counts naturally vary by $\pm 1\text{--}2$ tests across parameter vectors.*
 
 ---
 

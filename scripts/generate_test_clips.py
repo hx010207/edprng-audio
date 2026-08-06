@@ -72,9 +72,9 @@ def generate_am_tone() -> np.ndarray:
     return sig.astype(np.int16)
 
 
-def generate_percussive_noise() -> np.ndarray:
+def generate_percussive_noise(seed: int = 42) -> np.ndarray:
     """Clip 6: Broadband percussive/noise signal."""
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed)
     sig = rng.uniform(-28000.0, 28000.0, N_SAMPLES)
     return sig.astype(np.int16)
 
@@ -95,51 +95,26 @@ def generate_voiced_speech() -> np.ndarray:
     return sig.astype(np.int16)
 
 
-def generate_whispered_speech() -> np.ndarray:
+def generate_whispered_speech(seed: int = 42) -> np.ndarray:
     """Clip 8: Whispered-speech simulation (formant noise)."""
-    rng = np.random.default_rng(123)
-    noise = rng.normal(0, 1.0, N_SAMPLES)
-    fft_noise = np.fft.rfft(noise)
-    freqs = np.fft.rfftfreq(N_SAMPLES, 1.0 / SAMPLE_RATE)
-
-    env = np.exp(-((freqs - 500.0) ** 2) / (2 * 150**2)) + \
-          np.exp(-((freqs - 1500.0) ** 2) / (2 * 200**2)) + \
-          np.exp(-((freqs - 2500.0) ** 2) / (2 * 250**2))
-
-    fft_shaped = fft_noise * env
-    sig = np.fft.irfft(fft_shaped, N_SAMPLES)
+    rng = np.random.default_rng(seed + 81)
+    noise = rng.uniform(-1.0, 1.0, N_SAMPLES)
+    t = np.linspace(0, DURATION, N_SAMPLES, endpoint=False)
+    env = np.exp(-((t - 1.0) ** 2) / 0.5)
+    sig = noise * (0.5 + 0.5 * env)
     sig = sig / np.max(np.abs(sig)) * 28000.0
     return sig.astype(np.int16)
 
 
-def generate_all_test_clips() -> Dict[str, np.ndarray]:
-    """Generate dictionary of all 8 procedural test clips."""
+def generate_all_test_clips(seed: int = 42) -> Dict[str, np.ndarray]:
+    """Generate dict of 8 synthetic test clips (Section 8.1)."""
     return {
         "Speech (multi-formant)": generate_speech_multiformant(),
         "Musical chord": generate_musical_chord(),
         "Pure tone": generate_pure_tone(),
         "Frequency chirp": generate_frequency_chirp(),
         "AM tone": generate_am_tone(),
-        "Percussive/noise": generate_percussive_noise(),
+        "Percussive noise": generate_percussive_noise(seed=seed),
         "Voiced speech": generate_voiced_speech(),
-        "Whispered speech": generate_whispered_speech(),
+        "Whispered speech": generate_whispered_speech(seed=seed),
     }
-
-
-def save_clips_to_disk(output_dir: str = "results/clips") -> None:
-    """Generate and save all 8 clips as 16-bit PCM WAV files."""
-    os.makedirs(output_dir, exist_ok=True)
-    clips = generate_all_test_clips()
-    for name, pcm in clips.items():
-        safe_name = name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
-        filepath = os.path.join(output_dir, f"{safe_name}.wav")
-        with wave.open(filepath, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(SAMPLE_RATE)
-            wf.writeframes(pcm.tobytes())
-    print(f"Saved {len(clips)} audio test clips to '{output_dir}'")
-
-
-if __name__ == "__main__":
-    save_clips_to_disk()
