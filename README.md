@@ -115,9 +115,8 @@ ecga-idprng-a/
 
 1. **Clone the repository**:
    ```bash
-   # Replace YOUR_USERNAME with your GitHub username/organization once created
-   git clone https://github.com/YOUR_USERNAME/ecga-idprng-a.git
-   cd ecga-idprng-a
+   git clone https://github.com/hx010207/edprng-audio.git
+   cd edprng-audio
    ```
 
 2. **Install dependencies**:
