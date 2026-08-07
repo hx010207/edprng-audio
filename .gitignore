@@ -37,3 +37,8 @@ results/*.jpg
 results/*.svg
 results/*.json
 results/*.wav
+
+# Data files & audio corpora
+data/LibriSpeech/
+data/*.tar.gz
+

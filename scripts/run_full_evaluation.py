@@ -326,10 +326,27 @@ def run_full_evaluation(seed: int = 42):
     print("Generated Figures 3, 4, 5, and 6 in 'results/'.")
     print(f"\nFull evaluation (Seed = {seed}) completed successfully.")
 
+    eval_data = {
+        "seed": seed,
+        "table8": [{"clip": name, "h_plain": hp, "h_cipher": hc} for name, hp, hc in results_table8],
+        "table9": [{"clip": name, "hs_plain": hsp, "hs_cipher": hsc, "flat_plain": fp, "flat_cipher": fc, "snr": snr} for name, hsp, hsc, fp, fc, snr in results_table9],
+        "table11": [{"clip": name, "r_plain": rp, "r_cipher": rc} for name, rp, rc in results_table11],
+        "table12": [{"clip": name, "nscr_p": np_, "uaci_p": up, "nscr_k": nk, "uaci_k": uk} for name, np_, up, nk, uk in results_table12],
+        "nist": [{"test": name, "p_value": pval, "status": status} for name, pval, status in nist_results],
+        "nist_pass_count": pass_count
+    }
+    return eval_data
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Full Experimental Evaluation & Reproducibility Suite")
     parser.add_argument("--seed", type=int, default=42, help="Global seed for reproducible evaluation (default: 42)")
+    parser.add_argument("--json-out", type=str, default=None, help="Optional output path for JSON metrics dump")
     args = parser.parse_args()
 
-    run_full_evaluation(seed=args.seed)
+    data = run_full_evaluation(seed=args.seed)
+    if args.json_out:
+        with open(args.json_out, "w") as f:
+            json.dump(data, f, indent=2)
+
+
