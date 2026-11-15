@@ -18,6 +18,7 @@ Paper Section 3.4 & Section 5.2 (Eq. 4 & Eq. 8):
 Default certified parameters theta* = (30.175, 3.585, 29.642, 6.168, 0.622).
 """
 
+import hashlib
 import math
 import struct
 from typing import List, Tuple
@@ -70,16 +71,24 @@ def rk4_step(
 
 
 def derive_initial_state_from_key(ks: bytes) -> Tuple[float, float, float, float]:
-    """Derive non-zero initial state (x0, y0, z0, w0) from 32-byte session key Ks."""
-    if len(ks) < 32:
-        raise ValueError("Session key Ks must be 32 bytes")
+    """
+    Derive non-zero initial state (x0, y0, z0, w0) from a 32-byte key/seed.
 
-    # Split 32 bytes into 4 8-byte unsigned integers
-    u64s = struct.unpack(">4Q", ks[:32])
-    # Map uint64 to float in range [1.0, 100.0]
+    The four state variables are taken from SHA-512(ks || b"x0y0z0w0") and each
+    mapped to [1.0, 100.0) using the full 53-bit mantissa, so the seed carries
+    4 x 53 = 212 bits of entropy (versus ~80 bits in the previous `u % 990000`
+    mapping). This matters because the keystream seed must not be the weakest
+    link below the 256-bit session key / 128-bit ECDH security level.
+    """
+    if len(ks) < 32:
+        raise ValueError("Session key/seed must be at least 32 bytes")
+
+    digest = hashlib.sha512(ks[:32] + b"x0y0z0w0").digest()
+    u64s = struct.unpack(">4Q", digest[:32])
     initial_state = []
     for u in u64s:
-        val = 1.0 + (u % 990000) / 10000.0
+        # 53-bit precision mapped to [1.0, 100.0)
+        val = 1.0 + 99.0 * ((u >> 11) / float(2**53))
         initial_state.append(val)
     return (initial_state[0], initial_state[1], initial_state[2], initial_state[3])
 
@@ -92,10 +101,24 @@ class HyperchaoticGenerator:
         theta: Tuple[float, float, float, float, float] = CERTIFIED_THETA,
         h: float = 0.01,
         warmup_steps: int = 1000,
+        mode: str = "whitened",
     ) -> None:
+        """
+        Args:
+            mode: "whitened" (default) XORs the chaotic bytes with a SHAKE-256
+                keystream derived from the same seed, so the Layer-2 output is
+                indistinguishable from random under the SHAKE-256 PRF/XOF
+                assumption (this is what lets the IND-CPA reduction model
+                Layer 2 as a secure PRG; the raw chaotic stream fails the NIST
+                monobit, DFT and Maurer tests on its own). "raw" returns the
+                bare chaotic bytes and is kept only for the ablation columns.
+        """
+        if mode not in ("whitened", "raw"):
+            raise ValueError("mode must be 'whitened' or 'raw'")
         self.theta = theta
         self.h = h
         self.warmup_steps = warmup_steps
+        self.mode = mode
 
     def generate_keystream(
         self, length: int, ks: bytes, initial_state: Tuple[float, float, float, float] = None
@@ -134,5 +157,9 @@ class HyperchaoticGenerator:
             scaled = math.floor(frac_part * (2**32))
             byte_val = scaled % 256
             keystream_bytes.append(byte_val)
+
+        if self.mode == "whitened":
+            whitener = hashlib.shake_256(ks[:32] + b"KS").digest(length)
+            return bytes(b ^ w for b, w in zip(bytes(keystream_bytes), whitener))
 
         return bytes(keystream_bytes)

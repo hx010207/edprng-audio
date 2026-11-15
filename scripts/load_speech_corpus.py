@@ -1,7 +1,7 @@
 """
 Speech Corpus Loader with TIMIT Detection and LibriSpeech Open-Corpus Loader.
 
-Task 1 Implementation:
+Task 1 & Task 7 Implementation:
   - Hard verification step after loading each utterance:
       - Asserts file exists on disk and has non-zero size.
       - Decodes raw PCM via soundfile or NIST SPHERE parser.
@@ -112,8 +112,11 @@ def parse_nist_sphere_wav(filepath: str) -> Tuple[np.ndarray, int]:
 
 def try_load_timit(data_dir: str) -> List[Dict]:
     """Detect and parse real TIMIT dataset if present at data/timit/."""
-    timit_dir = os.path.join(data_dir, "timit")
-    if not os.path.exists(timit_dir):
+    if os.path.exists(os.path.join(data_dir, "timit")):
+        timit_dir = os.path.join(data_dir, "timit")
+    elif "timit" in os.path.basename(data_dir).lower() and os.path.exists(data_dir):
+        timit_dir = data_dir
+    else:
         return []
 
     wav_files = list(Path(timit_dir).rglob("*.WAV")) + list(Path(timit_dir).rglob("*.wav"))
@@ -148,31 +151,48 @@ def try_load_timit(data_dir: str) -> List[Dict]:
     return manifest
 
 
-def try_load_librispeech(data_dir: str) -> List[Dict]:
-    """Load real LibriSpeech FLAC files from data/LibriSpeech/dev-clean/."""
-    ls_dir = os.path.join(data_dir, "LibriSpeech", "dev-clean")
-    if not os.path.exists(ls_dir):
+def try_load_librispeech(data_dir: str, max_utterances: int = None) -> List[Dict]:
+    """Load real LibriSpeech FLAC files from data/LibriSpeech/dev-clean/ or specified path.
+
+    Args:
+        data_dir: Root data directory containing LibriSpeech/dev-clean/ or direct path.
+        max_utterances: Maximum number of utterances to load (default None = all).
+            When <= 24, prioritizes strict speaker diversity (one per speaker).
+            When > 24, relaxes speaker constraint to fill the requested count.
+    """
+    if os.path.exists(os.path.join(data_dir, "LibriSpeech", "dev-clean")):
+        ls_dir = os.path.join(data_dir, "LibriSpeech", "dev-clean")
+    elif os.path.exists(os.path.join(data_dir, "dev-clean")):
+        ls_dir = os.path.join(data_dir, "dev-clean")
+    elif os.path.exists(data_dir) and (list(Path(data_dir).rglob("*.flac")) or list(Path(data_dir).rglob("*.wav"))):
+        ls_dir = data_dir
+    else:
         return []
 
-    flac_files = list(Path(ls_dir).rglob("*.flac"))
+    flac_files = sorted(list(Path(ls_dir).rglob("*.flac")) + list(Path(ls_dir).rglob("*.wav")))
     if not flac_files:
         return []
 
-    print(f"\nFound {len(flac_files)} real LibriSpeech FLAC files in '{ls_dir}'. Loading 24 sampled utterances...")
+    target = min(max_utterances, len(flac_files)) if max_utterances is not None else len(flac_files)
+    print(f"\nFound {len(flac_files)} real audio files in '{ls_dir}'. Loading up to {target} utterances...")
     manifest = []
     visited_speakers = set()
 
+    # Pass 1: one utterance per speaker (diversity-first)
     for p in flac_files:
+        if len(manifest) >= target:
+            break
         str_p = str(p)
-        speaker_id = p.parent.parent.name
+        speaker_id = p.parent.parent.name if len(p.parents) > 2 else p.parent.name
         utterance_id = p.stem
 
-        # Sample across different speakers
-        if speaker_id in visited_speakers and len(visited_speakers) < 24:
+        if speaker_id in visited_speakers:
             continue
 
         try:
             pcm_float, sr = sf.read(str_p)
+            if len(pcm_float.shape) > 1:
+                pcm_float = pcm_float.mean(axis=1)
             verify_real_speech_audio(pcm_float, sr, str_p)
             pcm_8k = resample_to_8khz_16bit(pcm_float, sr)
 
@@ -190,32 +210,65 @@ def try_load_librispeech(data_dir: str) -> List[Dict]:
             print(f"  [LibriSpeech Warning] Failed verification for {str_p}: {e}")
             continue
 
-        if len(manifest) >= 24:
-            break
+    # Pass 2: fill remaining slots with additional utterances (allow repeats per speaker)
+    if len(manifest) < target:
+        loaded_paths = {item["path"] for item in manifest}
+        for p in flac_files:
+            if len(manifest) >= target:
+                break
+            str_p = str(p)
+            if str_p in loaded_paths:
+                continue
+            speaker_id = p.parent.parent.name if len(p.parents) > 2 else p.parent.name
+            utterance_id = p.stem
+            try:
+                pcm_float, sr = sf.read(str_p)
+                if len(pcm_float.shape) > 1:
+                    pcm_float = pcm_float.mean(axis=1)
+                verify_real_speech_audio(pcm_float, sr, str_p)
+                pcm_8k = resample_to_8khz_16bit(pcm_float, sr)
+                manifest.append({
+                    "utterance_id": utterance_id,
+                    "speaker_id": speaker_id,
+                    "path": str_p,
+                    "source_label": "LibriSpeech (TIMIT unavailable)",
+                    "pcm": pcm_8k,
+                })
+                loaded_paths.add(str_p)
+                print(f"  [LibriSpeech] Loaded '{utterance_id}' from {str_p}")
+            except Exception as e:
+                print(f"  [LibriSpeech Warning] Failed verification for {str_p}: {e}")
+                continue
 
     return manifest
 
 
-def load_speech_corpus(data_dir: str = "data") -> List[Dict]:
+def load_speech_corpus(data_dir: str = "data", max_utterances: int = None) -> List[Dict]:
     """
     Main corpus loader implementing TIMIT detection and LibriSpeech real audio loading.
     RAISES AN EXCEPTION if no genuine speech corpus is available.
+
+    Args:
+        data_dir: Root data directory or specific dataset path.
+        max_utterances: Maximum number of utterances to load (default None = all available).
     """
     # 1. Try TIMIT
     manifest = try_load_timit(data_dir)
     if manifest:
+        if max_utterances:
+            manifest = manifest[:max_utterances]
         print(f"\nSUCCESS: Verified and loaded {len(manifest)} utterances from real TIMIT corpus.")
         return manifest
 
     # 2. Try LibriSpeech
-    manifest = try_load_librispeech(data_dir)
+    manifest = try_load_librispeech(data_dir, max_utterances=max_utterances)
     if manifest:
         print(f"\nSUCCESS: Verified and loaded {len(manifest)} utterances from real LibriSpeech corpus.")
         return manifest
 
     raise RuntimeError(
         "CRITICAL ERROR: No genuine speech corpus could be loaded or verified from disk!\n"
-        "Expected TIMIT at 'data/timit/' or LibriSpeech at 'data/LibriSpeech/dev-clean/'.\n"
+        f"Expected TIMIT at '{data_dir}/timit/' or LibriSpeech at '{data_dir}/LibriSpeech/dev-clean/' or '{data_dir}'.\n"
         "Execution stopped to prevent using synthetic placeholders."
     )
 
