@@ -20,12 +20,17 @@ DEFAULT_R = 3.999
 
 
 def derive_logistic_seed_from_key(ks: bytes) -> float:
-    """Derive seed x0 in (0, 1) from SHA-256(Ks || 'LOGISTIC')."""
+    """
+    Derive seed x0 in (0.01, 0.99) from SHA-256(Ks || 'LOGISTIC').
+
+    The uint64 digest word is mapped with the full 53-bit mantissa rather than
+    the previous `u % 980000` (~20-bit) reduction, so the permutation seed is not
+    brute-forceable in ~10^6 tries. The seed is per-frame and secret-keyed, so it
+    is not the security bottleneck; the 256-bit key / P-256 ECDH is.
+    """
     digest = hashlib.sha256(ks + b"LOGISTIC").digest()
-    # Unpack first 8 bytes as uint64
     u64 = struct.unpack(">Q", digest[:8])[0]
-    # Map to (0.01, 0.99)
-    x0 = 0.01 + (u64 % 980000) / 1000000.0
+    x0 = 0.01 + 0.98 * ((u64 >> 11) / float(2**53))
     return x0
 
 

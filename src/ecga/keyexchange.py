@@ -14,6 +14,8 @@ from typing import Tuple
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from ecga.kdf import hkdf_sha256
+
 
 class KeyExchangeParty:
     """Represents a peer in the ECDSA-authenticated ECDH (P-256) key exchange."""
@@ -25,6 +27,8 @@ class KeyExchangeParty:
         self._ephemeral_private_key = None
         self._ephemeral_public_key = None
         self._nonce = None
+        self._pub_bytes = None
+        self.session_id = None
 
     def generate_ephemeral_handshake(self, nonce: bytes) -> Tuple[bytes, bytes, bytes]:
         """
@@ -41,6 +45,7 @@ class KeyExchangeParty:
             encoding=serialization.Encoding.X962,
             format=serialization.PublicFormat.UncompressedPoint,
         )
+        self._pub_bytes = pub_bytes
         msg_to_sign = pub_bytes + nonce
         signature = self.long_term_private_key.sign(
             msg_to_sign, ec.ECDSA(hashes.SHA256())
@@ -83,10 +88,23 @@ class KeyExchangeParty:
         )
         # Note: cryptography returns x-coordinate x(Z) directly in exchange()
 
-        # Ks = SHA-256(x(Z) || NA || NB) or (self_nonce || peer_nonce depending on role)
-        # We concatenate self_nonce and peer_nonce in order of party A vs party B, or as exchanged
-        kdf_input = shared_key_bytes + self._nonce + peer_nonce
-        session_key = hashlib.sha256(kdf_input).digest()
+        # Transcript binding (SIGMA/TLS 1.3 style): both peers build the SAME
+        # transcript by ordering the two (public point || nonce) records
+        # canonically, so A and B derive an identical key regardless of role.
+        # The previous `x(Z) || self_nonce || peer_nonce` ordering made A and B
+        # compute different keys.
+        my_record = self._pub_bytes + self._nonce
+        peer_record = peer_pub_bytes + peer_nonce
+        transcript = b"".join(sorted((my_record, peer_record)))
+        t_hash = hashlib.sha256(transcript).digest()
+
+        session_key = hkdf_sha256(
+            ikm=shared_key_bytes,
+            salt=t_hash,
+            info=b"ECGA-IDPRNG-A/v2/session",
+            length=32,
+        )
+        self.session_id = t_hash[:16]
         return session_key
 
 

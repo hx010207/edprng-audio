@@ -8,13 +8,15 @@ Usage:
 """
 
 import argparse
-import os
+import secrets
 import sys
 import wave
 from typing import Tuple
 
 from ecga.keyexchange import derive_demo_session_key
 from ecga.pipeline import AudioFrameCipher
+
+_MAGIC = b"ECG2"
 
 
 def read_wav_file(filepath: str) -> Tuple[bytes, int, int, int]:
@@ -46,18 +48,24 @@ def encrypt_wav(input_path: str, output_path: str, session_key: bytes) -> None:
     pcm_bytes, n_channels, sampwidth, framerate = read_wav_file(input_path)
     cipher = AudioFrameCipher()
 
+    # Fresh random session identifier; frame counter increments per frame so no
+    # two frames of a session reuse the keystream (Section 5.5).
+    session_id = secrets.token_bytes(16)
+
     # Frame size = 32000 bytes (16000 samples, ~2 seconds at 8kHz mono)
     frame_size = 32000
     encrypted_frames = []
 
-    for offset in range(0, len(pcm_bytes), frame_size):
+    for ctr, offset in enumerate(range(0, len(pcm_bytes), frame_size)):
         chunk = pcm_bytes[offset : offset + frame_size]
-        c_bytes, tag = cipher.encrypt_frame(chunk, session_key)
+        c_bytes, tag = cipher.encrypt_frame(chunk, session_key, ctr=ctr, session_id=session_id)
         encrypted_frames.append((len(chunk), tag, c_bytes))
 
-    # Write binary container
+    # Write binary container (v2: "ECG2" magic + 16-byte session_id; ctr is the
+    # frame index and reconstructed on decrypt).
     with open(output_path, "wb") as f:
-        # Header: channels (2 bytes), sampwidth (2 bytes), framerate (4 bytes), frame count (4 bytes)
+        f.write(_MAGIC)
+        f.write(session_id)
         f.write(n_channels.to_bytes(2, "big"))
         f.write(sampwidth.to_bytes(2, "big"))
         f.write(framerate.to_bytes(4, "big"))
@@ -76,18 +84,26 @@ def decrypt_wav(input_path: str, output_path: str, session_key: bytes) -> None:
     cipher = AudioFrameCipher()
 
     with open(input_path, "rb") as f:
+        magic = f.read(4)
+        if magic != _MAGIC:
+            raise ValueError(
+                "Unrecognised container (expected 'ECG2'). Re-encrypt with this version."
+            )
+        session_id = f.read(16)
         n_channels = int.from_bytes(f.read(2), "big")
         sampwidth = int.from_bytes(f.read(2), "big")
         framerate = int.from_bytes(f.read(4), "big")
         n_frames = int.from_bytes(f.read(4), "big")
 
         decrypted_chunks = []
-        for _ in range(n_frames):
+        for ctr in range(n_frames):
             orig_len = int.from_bytes(f.read(4), "big")
             tag = f.read(32)
             c_bytes = f.read(orig_len)
 
-            p_bytes = cipher.decrypt_frame(c_bytes, tag, session_key, as_pcm=False)
+            p_bytes = cipher.decrypt_frame(
+                c_bytes, tag, session_key, ctr=ctr, session_id=session_id, as_pcm=False
+            )
             decrypted_chunks.append(p_bytes)
 
     full_pcm = b"".join(decrypted_chunks)
@@ -104,19 +120,26 @@ def main() -> None:
     enc_parser.add_argument("--in", dest="input_file", required=True, help="Input WAV file")
     enc_parser.add_argument("--out", dest="output_file", required=True, help="Output enc file")
     enc_parser.add_argument("--key", dest="hex_key", default=None, help="Hex-encoded 32-byte session key")
+    enc_parser.add_argument("--demo", action="store_true", help="Use the PUBLIC demo key (NOT secret)")
 
     # Decrypt parser
     dec_parser = subparsers.add_parser("decrypt", help="Decrypt an enc file to WAV")
     dec_parser.add_argument("--in", dest="input_file", required=True, help="Input enc file")
     dec_parser.add_argument("--out", dest="output_file", required=True, help="Output WAV file")
     dec_parser.add_argument("--key", dest="hex_key", default=None, help="Hex-encoded 32-byte session key")
+    dec_parser.add_argument("--demo", action="store_true", help="Use the PUBLIC demo key (NOT secret)")
 
     args = parser.parse_args()
 
     if args.hex_key:
         session_key = bytes.fromhex(args.hex_key)
-    else:
+        if len(session_key) != 32:
+            parser.error("--key must be exactly 32 bytes (64 hex chars)")
+    elif args.demo:
+        sys.stderr.write("WARNING: using the PUBLIC DEMO KEY - NOT SECRET. For demonstration only.\n")
         session_key = derive_demo_session_key()
+    else:
+        parser.error("No key supplied. Pass --key HEX (32 bytes) or --demo for the public demo key.")
 
     if args.command == "encrypt":
         encrypt_wav(args.input_file, args.output_file, session_key)

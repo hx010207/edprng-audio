@@ -7,13 +7,22 @@ Paper Section 3.2, Section 5 (Figures 1-2, Algorithm 2, Eq. 1-2 & Eq. 15):
   and Layer 5 (Two-pass ARX + HMAC-SHA256 tag).
 """
 
+import hmac as _hmac
+import hashlib as _hashlib
 import struct
 from typing import List, Tuple, Union
 
 from ecga.arx import TwoPassARX
 from ecga.cellular_automaton import RuleThirtyCA
 from ecga.hyperchaos import CERTIFIED_THETA, HyperchaoticGenerator
+from ecga.kdf import derive_subkeys, frame_seed
 from ecga.permutation import LogisticPermutation
+
+# Default 16-byte session identifier used when a caller does not supply one
+# (single-shot encryption, the worked example, and the ablation scripts). Real
+# streaming sessions pass a random session_id and an incrementing ctr.
+DEFAULT_SESSION_ID = b"\x00" * 16
+_TAG_DOMAIN = b"ECGA-IDPRNG-A/v2"
 
 
 def pcm_to_bytes(samples: List[int]) -> bytes:
@@ -50,10 +59,24 @@ class AudioFrameCipher:
         self.hyper_gen = hyper_gen or HyperchaoticGenerator(theta=theta)
         self.perm_gen = perm_gen or LogisticPermutation()
 
+    @staticmethod
+    def _tag(k_mac: bytes, session_id: bytes, ctr: int, c_bytes: bytes) -> bytes:
+        """HMAC-SHA256_{K_mac}(domain || session_id || ctr || len(C) || C) (Eq. 14)."""
+        msg = (
+            _TAG_DOMAIN
+            + session_id
+            + ctr.to_bytes(8, "big")
+            + len(c_bytes).to_bytes(4, "big")
+            + c_bytes
+        )
+        return _hmac.new(k_mac, msg, _hashlib.sha256).digest()
+
     def encrypt_frame(
         self,
         frame: Union[List[int], bytes],
         session_key: bytes,
+        ctr: int = 0,
+        session_id: bytes = DEFAULT_SESSION_ID,
         override_ks: bytes = None,
         override_ca: bytes = None,
         override_pi: List[int] = None,
@@ -79,23 +102,29 @@ class AudioFrameCipher:
 
         length = len(p_bytes)
 
+        # Domain-separated subkeys and per-frame seeds (Algorithm 1; Section 5.5)
+        sk = derive_subkeys(session_key)
+        seed_hyper = frame_seed(sk.k_hyper, session_id, ctr)
+        seed_ca = frame_seed(sk.k_ca, session_id, ctr)
+        seed_perm = frame_seed(sk.k_perm, session_id, ctr)
+
         # Step 2: Keystream KS (Layer 2)
         if override_ks is not None:
             ks_bytes = override_ks
         else:
-            ks_bytes = self.hyper_gen.generate_keystream(length, session_key)
+            ks_bytes = self.hyper_gen.generate_keystream(length, seed_hyper)
 
         # Step 3: Rule-30 Mask CA (Layer 3)
         if override_ca is not None:
             ca_bytes = override_ca
         else:
-            ca_bytes = self.ca_gen.generate_mask(length, session_key)
+            ca_bytes = self.ca_gen.generate_mask(length, seed_ca)
 
         # Step 4: Logistic Permutation pi (Layer 4) & q = pi(P)
         if override_pi is not None:
             pi = override_pi
         else:
-            pi = self.perm_gen.generate_permutation(length, session_key)
+            pi = self.perm_gen.generate_permutation(length, seed_perm)
 
         q_bytes = self.perm_gen.apply_permutation(p_bytes, pi)
 
@@ -103,8 +132,8 @@ class AudioFrameCipher:
         f_bytes = self.arx.forward_pass(q_bytes, ks_bytes, ca_bytes)
         c_bytes = self.arx.backward_pass(f_bytes)
 
-        # Step 6: HMAC-SHA256 authentication tag tau
-        tau = self.arx.compute_hmac_tag(session_key, c_bytes)
+        # Step 6: Encrypt-then-MAC tag over (session_id || ctr || C)
+        tau = self._tag(sk.k_mac, session_id, ctr, c_bytes)
 
         return c_bytes, tau
 
@@ -113,6 +142,8 @@ class AudioFrameCipher:
         ciphertext: bytes,
         tag: bytes,
         session_key: bytes,
+        ctr: int = 0,
+        session_id: bytes = DEFAULT_SESSION_ID,
         as_pcm: bool = True,
         override_ks: bytes = None,
         override_ca: bytes = None,
@@ -133,27 +164,33 @@ class AudioFrameCipher:
         Returns:
             Decrypted 16-bit PCM samples S or raw bytes P.
         """
-        # Step 1: Check HMAC tag
-        if not self.arx.verify_hmac_tag(session_key, ciphertext, tag):
+        sk = derive_subkeys(session_key)
+
+        # Step 1: Check HMAC tag (Encrypt-then-MAC) in constant time BEFORE decrypt
+        expected = self._tag(sk.k_mac, session_id, ctr, ciphertext)
+        if not _hmac.compare_digest(expected, tag):
             raise ValueError("HMAC-SHA256 integrity check failed: frame tampered or key invalid")
 
         length = len(ciphertext)
+        seed_hyper = frame_seed(sk.k_hyper, session_id, ctr)
+        seed_ca = frame_seed(sk.k_ca, session_id, ctr)
+        seed_perm = frame_seed(sk.k_perm, session_id, ctr)
 
         # Step 2: Regenerate masks
         if override_ks is not None:
             ks_bytes = override_ks
         else:
-            ks_bytes = self.hyper_gen.generate_keystream(length, session_key)
+            ks_bytes = self.hyper_gen.generate_keystream(length, seed_hyper)
 
         if override_ca is not None:
             ca_bytes = override_ca
         else:
-            ca_bytes = self.ca_gen.generate_mask(length, session_key)
+            ca_bytes = self.ca_gen.generate_mask(length, seed_ca)
 
         if override_pi is not None:
             pi = override_pi
         else:
-            pi = self.perm_gen.generate_permutation(length, session_key)
+            pi = self.perm_gen.generate_permutation(length, seed_perm)
 
         # Step 3: Invert Backward ARX pass -> f
         f_bytes = self.arx.backward_pass_inverse(ciphertext)

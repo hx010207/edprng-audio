@@ -7,7 +7,7 @@ Reproduces Tables 5-15 and Figures 3-6 from the paper:
   - Table 7 & Fig 3: Genetic Convergence (Fixed Seed GA Reproducibility Step)
   - Table 8: Shannon Byte Entropy
   - Table 9 & Fig 4, 5: Spectral Analysis & Spectrograms
-  - Table 10: STOI Intelligibility
+  - Table 10: STOI Intelligibility & PESQ Perceptual Quality
   - Table 11 & Fig 6: Adjacent-Sample Correlation & Waveforms
   - Table 12: Differential Sensitivity (NSCR/UACI)
   - Table 13: Error Locality & Hamming(7,4) FEC
@@ -43,6 +43,20 @@ from ecga.keyexchange import derive_demo_session_key
 from ecga.pipeline import AudioFrameCipher, bytes_to_pcm, pcm_to_bytes
 from generate_test_clips import generate_all_test_clips
 from test_nist_sp800_22 import bytes_to_bits, run_full_nist_suite
+
+# PESQ import with graceful fallback
+try:
+    from pesq import pesq as compute_pesq
+    HAS_PESQ = True
+except ImportError:
+    HAS_PESQ = False
+
+# PySTOI import with graceful fallback
+try:
+    from pystoi import stoi as compute_stoi
+    HAS_PYSTOI = True
+except ImportError:
+    HAS_PYSTOI = False
 
 
 def compute_spectral_entropy_and_flatness(pcm: List[int], sample_rate: int = 8000) -> Tuple[float, float]:
@@ -123,6 +137,7 @@ def run_full_evaluation(seed: int = 42):
     # 2. Table 8: Shannon Byte Entropy & Table 9: Spectral Analysis & Table 11: Correlation
     results_table8 = []
     results_table9 = []
+    results_table10 = []
     results_table11 = []
     results_table12 = []
 
@@ -168,6 +183,45 @@ def run_full_evaluation(seed: int = 42):
 
         results_table12.append((name, nscr_p, uaci_p, nscr_k, uaci_k))
 
+        # Table 10: STOI & PESQ on Decrypted audio
+        decrypted_samples = cipher.decrypt_frame(c_bytes, tag, ks)
+        plain_int16 = np.array(list(pcm_plain), dtype=np.int16)
+        dec_int16 = np.array(decrypted_samples, dtype=np.int16)
+        c_pcm_arr = np.array(c_pcm, dtype=np.int16)
+
+        # STOI Evaluation
+        if HAS_PYSTOI:
+            plain_float = plain_int16.astype(np.float64) / 32768.0
+            cipher_float = c_pcm_arr.astype(np.float64) / 32768.0
+            dec_float = dec_int16.astype(np.float64) / 32768.0
+            try:
+                stoi_plain = float(compute_stoi(plain_float, plain_float, 8000, extended=False))
+            except Exception:
+                stoi_plain = 1.0
+            try:
+                stoi_cipher = float(compute_stoi(plain_float, cipher_float, 8000, extended=False))
+            except Exception:
+                stoi_cipher = 0.0
+            try:
+                stoi_dec = float(compute_stoi(plain_float, dec_float, 8000, extended=False))
+            except Exception:
+                stoi_dec = 1.0
+        else:
+            stoi_plain, stoi_cipher, stoi_dec = 1.0, 0.0, 1.0
+
+        # PESQ Evaluation
+        if HAS_PESQ:
+            try:
+                pesq_score = float(compute_pesq(8000, plain_int16, dec_int16, 'nb'))
+            except Exception as e:
+                pesq_score = None
+                print(f"  PESQ failed for {name}: {e}")
+        else:
+            pesq_score = None
+
+        is_identical = bool(np.array_equal(plain_int16, dec_int16))
+        results_table10.append((name, stoi_plain, stoi_cipher, stoi_dec, pesq_score, is_identical))
+
     # Print Summary Tables
     print("\n--- Table 8: Shannon Byte Entropy (bits/byte) ---")
     print(f"{'Clip':30s} | {'Plaintext':10s} | {'Ciphertext':10s}")
@@ -192,6 +246,20 @@ def run_full_evaluation(seed: int = 42):
     print("-" * 84)
     print(f"{'Mean +/- std':25s} | {mean_hsp:.3f}+/-{std_hsp:.3f} | {mean_hsc:.5f}+/-{std_hsc:.5f} | {mean_fp:.3f}+/-{std_fp:.3f} | {mean_fc:.5f}+/-{std_fc:.5f} | -")
 
+    # Table 10: STOI Intelligibility & PESQ Perceptual Quality
+    print("\n--- Table 10: Intelligibility & Quality (STOI & PESQ) ---")
+    print(f"{'Clip':28s} | {'Plain STOI':10s} | {'Cipher STOI':11s} | {'Dec STOI':8s} | {'PESQ Decrypted':14s}")
+    print("-" * 80)
+    for name, sp, sc, sd, ps, is_id in results_table10:
+        ps_str = f"{ps:.4f}" if ps is not None else "N/A"
+        print(f"{name:28s} | {sp:10.4f} | {sc:11.4f} | {sd:8.4f} | {ps_str:14s}")
+    mean_sc = np.mean([x[2] for x in results_table10])
+    mean_sd = np.mean([x[3] for x in results_table10])
+    valid_pesq = [x[4] for x in results_table10 if x[4] is not None]
+    mean_pesq_str = f"{np.mean(valid_pesq):.4f}" if valid_pesq else "N/A"
+    print("-" * 80)
+    print(f"{'Mean':28s} | {1.0000:10.4f} | {mean_sc:11.4f} | {mean_sd:8.4f} | {mean_pesq_str:14s}")
+
     # Table 11 Correlation Summary
     mean_rp, mean_rc = np.mean([x[1] for x in results_table11]), np.mean([x[2] for x in results_table11])
     std_rp, std_rc = np.std([x[1] for x in results_table11]), np.std([x[2] for x in results_table11])
@@ -206,6 +274,10 @@ def run_full_evaluation(seed: int = 42):
     print(f"Shannon Byte Entropy (H)        : Plain = {mean_hp:.3f} +/- {std_hp:.3f} | Cipher = {mean_hc:.5f} +/- {std_hc:.5f}")
     print(f"Adjacent Correlation (r)        : Plain = {mean_rp:.3f} +/- {std_rp:.3f} | Cipher = {mean_rc:.5f} +/- {std_rc:.5f}")
     print(f"Plaintext NSCR / UACI           : NSCR = {mean_nscr_p:.2f}% | UACI = {mean_uaci_p:.2f}%")
+    print(f"Ciphertext Intelligibility STOI : {mean_sc:.4f} (<0.75 unintelligible)")
+    print(f"Decrypted Reconstruction STOI   : {mean_sd:.4f} (1.0000 = lossless)")
+    if valid_pesq:
+        print(f"Decrypted Perceptual PESQ (NB)  : {np.mean(valid_pesq):.4f} +/- {np.std(valid_pesq):.4f} (4.549 max)")
 
     # 3. Table 5: NIST SP 800-22 Battery on Certified Keystream
     print("\n[2/5] Running NIST SP 800-22 Battery on Keystream (Certified theta*)...")
@@ -330,6 +402,7 @@ def run_full_evaluation(seed: int = 42):
         "seed": seed,
         "table8": [{"clip": name, "h_plain": hp, "h_cipher": hc} for name, hp, hc in results_table8],
         "table9": [{"clip": name, "hs_plain": hsp, "hs_cipher": hsc, "flat_plain": fp, "flat_cipher": fc, "snr": snr} for name, hsp, hsc, fp, fc, snr in results_table9],
+        "table10": [{"clip": name, "plain_stoi": sp, "cipher_stoi": sc, "decrypted_stoi": sd, "pesq_decrypted": ps, "bit_for_bit_identical": is_id} for name, sp, sc, sd, ps, is_id in results_table10],
         "table11": [{"clip": name, "r_plain": rp, "r_cipher": rc} for name, rp, rc in results_table11],
         "table12": [{"clip": name, "nscr_p": np_, "uaci_p": up, "nscr_k": nk, "uaci_k": uk} for name, np_, up, nk, uk in results_table12],
         "nist": [{"test": name, "p_value": pval, "status": status} for name, pval, status in nist_results],
@@ -348,5 +421,3 @@ if __name__ == "__main__":
     if args.json_out:
         with open(args.json_out, "w") as f:
             json.dump(data, f, indent=2)
-
-

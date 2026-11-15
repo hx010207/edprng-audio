@@ -1,0 +1,7 @@
+Highlights
+
+- Spectral flattening is adopted as the security criterion for speech encryption
+- Lyapunov-certified chaotic keystream; non-chaotic parameters are rejected outright
+- Authenticated ECDH session keys are escrowed with (3,5) Shamir threshold sharing
+- Ciphertext spectral entropy matches white noise on 100 LibriSpeech utterances
+- Reductions cover confidentiality, integrity, key exchange and threshold recovery
